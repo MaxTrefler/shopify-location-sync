@@ -16,29 +16,34 @@ const LOCATION_CUSTOM_ORDERS = process.env.LOCATION_CUSTOM_ORDERS;
 app.use('/webhooks/inventory', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
-// Token cache
 let cachedToken = null;
 let tokenExpiresAt = 0;
 
 async function getToken() {
   if (cachedToken && Date.now() < tokenExpiresAt - 60000) return cachedToken;
 
-  const response = await fetch(
-    `https://${SHOPIFY_SHOP}.myshopify.com/admin/oauth/access_token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-      }),
-    }
-  );
+  const url = `https://${SHOPIFY_SHOP}.myshopify.com/admin/oauth/access_token`;
+  console.log('Requesting token from:', url);
+  console.log('CLIENT_ID:', CLIENT_ID ? CLIENT_ID.substring(0, 8) + '...' : 'MISSING');
+  console.log('CLIENT_SECRET:', CLIENT_SECRET ? CLIENT_SECRET.substring(0, 8) + '...' : 'MISSING');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    }),
+  });
+
+  const responseText = await response.text();
+  console.log('Token response status:', response.status);
+  console.log('Token response body:', responseText);
 
   if (!response.ok) throw new Error('Token request failed: ' + response.status);
 
-  const { access_token, expires_in } = await response.json();
+  const { access_token, expires_in } = JSON.parse(responseText);
   cachedToken = access_token;
   tokenExpiresAt = Date.now() + expires_in * 1000;
   console.log('Got fresh access token');
