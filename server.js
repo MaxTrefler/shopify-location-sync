@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
+const { URLSearchParams } = require('url');
 
 const app = express();
 
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const LOCATION_SOUL_DRUMS = process.env.LOCATION_SOUL_DRUMS;
 const LOCATION_BACKORDER_WAREHOUSE = process.env.LOCATION_BACKORDER_WAREHOUSE;
@@ -14,8 +16,39 @@ const LOCATION_CUSTOM_ORDERS = process.env.LOCATION_CUSTOM_ORDERS;
 app.use('/webhooks/inventory', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
+// Token cache
+let cachedToken = null;
+let tokenExpiresAt = 0;
+
+async function getToken() {
+  if (cachedToken && Date.now() < tokenExpiresAt - 60000) return cachedToken;
+
+  const response = await fetch(
+    `https://${SHOPIFY_SHOP}.myshopify.com/admin/oauth/access_token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }),
+    }
+  );
+
+  if (!response.ok) throw new Error('Token request failed: ' + response.status);
+
+  const { access_token, expires_in } = await response.json();
+  cachedToken = access_token;
+  tokenExpiresAt = Date.now() + expires_in * 1000;
+  console.log('Got fresh access token');
+  return cachedToken;
+}
+
 async function updateMetafield(inventoryItemId) {
   try {
+    const token = await getToken();
+
     const query = `query {
       inventoryItem(id: "gid://shopify/InventoryItem/${inventoryItemId}") {
         variant { id }
@@ -30,26 +63,28 @@ async function updateMetafield(inventoryItemId) {
       }
     }`;
 
-    const gqlResponse = await fetch(`https://${SHOPIFY_SHOP}/admin/api/2025-01/graphql.json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': ACCESS_TOKEN
-      },
-      body: JSON.stringify({ query })
-    });
+    const gqlResponse = await fetch(
+      `https://${SHOPIFY_SHOP}.myshopify.com/admin/api/2025-01/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': token
+        },
+        body: JSON.stringify({ query })
+      }
+    );
 
     const json = await gqlResponse.json();
     console.log('GraphQL response:', JSON.stringify(json));
 
     if (!json.data || !json.data.inventoryItem) {
-      console.log('No inventory item in response - check ACCESS_TOKEN permissions');
+      console.log('No inventory item in response');
       return;
     }
 
     const item = json.data.inventoryItem;
-    const variantGid = item.variant.id;
-    const variantId = variantGid.split('/').pop();
+    const variantId = item.variant.id.split('/').pop();
     const levels = item.inventoryLevels.edges;
 
     const leadTimes = {
@@ -66,23 +101,26 @@ async function updateMetafield(inventoryItemId) {
       if (locId === LOCATION_CUSTOM_ORDERS) leadTimes.custom_orders = qty;
     });
 
-    const metafieldResponse = await fetch(`https://${SHOPIFY_SHOP}/admin/api/2025-01/variants/${variantId}/metafields.json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': ACCESS_TOKEN
-      },
-      body: JSON.stringify({
-        metafield: {
-          namespace: 'custom',
-          key: 'location_lead_times',
-          value: JSON.stringify(leadTimes),
-          type: 'json'
-        }
-      })
-    });
+    const metafieldRes = await fetch(
+      `https://${SHOPIFY_SHOP}.myshopify.com/admin/api/2025-01/variants/${variantId}/metafields.json`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': token
+        },
+        body: JSON.stringify({
+          metafield: {
+            namespace: 'custom',
+            key: 'location_lead_times',
+            value: JSON.stringify(leadTimes),
+            type: 'json'
+          }
+        })
+      }
+    );
 
-    const metafieldJson = await metafieldResponse.json();
+    const metafieldJson = await metafieldRes.json();
     console.log('Metafield response:', JSON.stringify(metafieldJson));
     console.log('Updated variant', variantId, leadTimes);
 
@@ -121,10 +159,7 @@ app.post('/webhooks/inventory', async (req, res) => {
     return;
   }
 
-  const { inventory_item_id } = payload;
-  if (inventory_item_id) {
-    await updateMetafield(inventory_item_id);
-  }
+  await updateMetafield(payload.inventory_item_id);
 });
 
 app.get('/', (req, res) => res.send('Location Sync LIVE'));
