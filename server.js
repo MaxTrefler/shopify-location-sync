@@ -39,8 +39,15 @@ async function updateMetafield(inventoryItemId) {
       body: JSON.stringify({ query })
     });
 
-    const { data } = await gqlResponse.json();
-    const item = data.inventoryItem;
+    const json = await gqlResponse.json();
+    console.log('GraphQL response:', JSON.stringify(json));
+
+    if (!json.data || !json.data.inventoryItem) {
+      console.log('No inventory item in response - check ACCESS_TOKEN permissions');
+      return;
+    }
+
+    const item = json.data.inventoryItem;
     const variantGid = item.variant.id;
     const variantId = variantGid.split('/').pop();
     const levels = item.inventoryLevels.edges;
@@ -59,7 +66,7 @@ async function updateMetafield(inventoryItemId) {
       if (locId === LOCATION_CUSTOM_ORDERS) leadTimes.custom_orders = qty;
     });
 
-    await fetch(`https://${SHOPIFY_SHOP}/admin/api/2025-01/variants/${variantId}/metafields.json`, {
+    const metafieldResponse = await fetch(`https://${SHOPIFY_SHOP}/admin/api/2025-01/variants/${variantId}/metafields.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -75,6 +82,8 @@ async function updateMetafield(inventoryItemId) {
       })
     });
 
+    const metafieldJson = await metafieldResponse.json();
+    console.log('Metafield response:', JSON.stringify(metafieldJson));
     console.log('Updated variant', variantId, leadTimes);
 
   } catch (e) {
