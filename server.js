@@ -91,23 +91,25 @@ app.post('/webhooks/inventory', async (req, res) => {
     return res.status(401).send('Unauthorized');
   }
 
-    let payload;
+  res.status(200).send('OK');
+
+  let payload;
   try {
     payload = JSON.parse(req.body);
   } catch (e) {
-    console.log('Test webhook received - null body, skipping');
-    return res.status(200).send('OK');
+    console.log('Test webhook - null body, skipping');
+    return;
   }
 
-  res.status(200).send('OK');
+  // DEBUG - log everything received
+  console.log('Webhook payload:', JSON.stringify(payload));
 
   if (!payload || !payload.inventory_item_id) {
-    console.log('Test webhook received - no inventory data, skipping');
+    console.log('No inventory data in payload, skipping');
     return;
   }
 
   const { inventory_item_id, variant_id } = payload;
-
   if (variant_id && inventory_item_id) {
     await updateMetafield(variant_id, inventory_item_id);
   }
