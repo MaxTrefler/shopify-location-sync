@@ -82,11 +82,22 @@ async function updateMetafield(variantId, inventoryItemId) {
 app.post('/webhooks/inventory', async (req, res) => {
   const hmac = req.get('X-Shopify-Hmac-Sha256');
 
-  // ✅ Use raw buffer directly
   const calculated = crypto
     .createHmac('sha256', WEBHOOK_SECRET)
     .update(req.body)
     .digest('base64');
 
   if (hmac !== calculated) {
-    console.log('❌ HMAC mismatch
+    console.log('HMAC mismatch - unauthorized');
+    return res.status(401).send('Unauthorized');
+  }
+
+  const payload = JSON.parse(req.body);
+  res.status(200).send('OK');
+
+  const { inventory_item_id, variant_id } = payload;
+  if (variant_id && inventory_item_id) {
+    await updateMetafield(variant_id, inventory_item_id);
+  }
+});
+
