@@ -11,7 +11,6 @@ const LOCATION_SOUL_DRUMS = process.env.LOCATION_SOUL_DRUMS;
 const LOCATION_BACKORDER_WAREHOUSE = process.env.LOCATION_BACKORDER_WAREHOUSE;
 const LOCATION_CUSTOM_ORDERS = process.env.LOCATION_CUSTOM_ORDERS;
 
-// ✅ Raw body for HMAC verification
 app.use('/webhooks/inventory', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
@@ -34,7 +33,7 @@ async function updateMetafield(variantId, inventoryItemId) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': ACCESS_TOKEN  // ✅ Direct token, no OAuth
+        'X-Shopify-Access-Token': ACCESS_TOKEN
       },
       body: JSON.stringify({ query })
     });
@@ -75,7 +74,7 @@ async function updateMetafield(variantId, inventoryItemId) {
     console.log('Updated variant', variantId, leadTimes);
 
   } catch (e) {
-    console.error('Error:', e);
+    console.error('Error updating metafield:', e);
   }
 }
 
@@ -101,3 +100,7 @@ app.post('/webhooks/inventory', async (req, res) => {
   }
 });
 
+app.get('/', (req, res) => res.send('Location Sync LIVE'));
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log('Listening on port ' + port));
