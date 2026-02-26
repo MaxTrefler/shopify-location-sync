@@ -14,10 +14,11 @@ const LOCATION_CUSTOM_ORDERS = process.env.LOCATION_CUSTOM_ORDERS;
 app.use('/webhooks/inventory', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
-async function updateMetafield(variantId, inventoryItemId) {
+async function updateMetafield(inventoryItemId) {
   try {
     const query = `query {
       inventoryItem(id: "gid://shopify/InventoryItem/${inventoryItemId}") {
+        variant { id }
         inventoryLevels(first: 10) {
           edges {
             node {
@@ -29,7 +30,7 @@ async function updateMetafield(variantId, inventoryItemId) {
       }
     }`;
 
-    const gqlResponse = await fetch(`https://${SHOPIFY_SHOP}/admin/api/2026-01/graphql.json`, {
+    const gqlResponse = await fetch(`https://${SHOPIFY_SHOP}/admin/api/2025-01/graphql.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -39,7 +40,10 @@ async function updateMetafield(variantId, inventoryItemId) {
     });
 
     const { data } = await gqlResponse.json();
-    const levels = data.inventoryItem.inventoryLevels.edges;
+    const item = data.inventoryItem;
+    const variantGid = item.variant.id;
+    const variantId = variantGid.split('/').pop();
+    const levels = item.inventoryLevels.edges;
 
     const leadTimes = {
       soul_drums: 0,
@@ -55,7 +59,7 @@ async function updateMetafield(variantId, inventoryItemId) {
       if (locId === LOCATION_CUSTOM_ORDERS) leadTimes.custom_orders = qty;
     });
 
-    await fetch(`https://${SHOPIFY_SHOP}/admin/api/2026-01/variants/${variantId}/metafields.json`, {
+    await fetch(`https://${SHOPIFY_SHOP}/admin/api/2025-01/variants/${variantId}/metafields.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -101,7 +105,6 @@ app.post('/webhooks/inventory', async (req, res) => {
     return;
   }
 
-  // DEBUG - log everything received
   console.log('Webhook payload:', JSON.stringify(payload));
 
   if (!payload || !payload.inventory_item_id) {
@@ -109,9 +112,9 @@ app.post('/webhooks/inventory', async (req, res) => {
     return;
   }
 
-  const { inventory_item_id, variant_id } = payload;
-  if (variant_id && inventory_item_id) {
-    await updateMetafield(variant_id, inventory_item_id);
+  const { inventory_item_id } = payload;
+  if (inventory_item_id) {
+    await updateMetafield(inventory_item_id);
   }
 });
 
