@@ -1,37 +1,22 @@
 require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
 const crypto = require('crypto');
 
 const app = express();
-app.use(bodyParser.json());
 
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
-const CLIENT_ID = process.env.CLIENT_ID;
-const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const LOCATION_SOUL_DRUMS = process.env.LOCATION_SOUL_DRUMS;
 const LOCATION_BACKORDER_WAREHOUSE = process.env.LOCATION_BACKORDER_WAREHOUSE;
 const LOCATION_CUSTOM_ORDERS = process.env.LOCATION_CUSTOM_ORDERS;
 
-async function getAccessToken() {
-  const response = await fetch(`https://${SHOPIFY_SHOP}/admin/oauth/access_token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      grant_type: 'client_credentials'
-    })
-  });
-  const data = await response.json();
-  return data.access_token;
-}
+// ✅ Raw body for HMAC verification
+app.use('/webhooks/inventory', express.raw({ type: 'application/json' }));
+app.use(express.json());
 
 async function updateMetafield(variantId, inventoryItemId) {
   try {
-    const token = await getAccessToken();
-
     const query = `query {
       inventoryItem(id: "gid://shopify/InventoryItem/${inventoryItemId}") {
         inventoryLevels(first: 10) {
@@ -49,7 +34,7 @@ async function updateMetafield(variantId, inventoryItemId) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': token
+        'X-Shopify-Access-Token': ACCESS_TOKEN  // ✅ Direct token, no OAuth
       },
       body: JSON.stringify({ query })
     });
@@ -75,7 +60,7 @@ async function updateMetafield(variantId, inventoryItemId) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': token
+        'X-Shopify-Access-Token': ACCESS_TOKEN
       },
       body: JSON.stringify({
         metafield: {
@@ -96,25 +81,12 @@ async function updateMetafield(variantId, inventoryItemId) {
 
 app.post('/webhooks/inventory', async (req, res) => {
   const hmac = req.get('X-Shopify-Hmac-Sha256');
-  const body = JSON.stringify(req.body);
+
+  // ✅ Use raw buffer directly
   const calculated = crypto
     .createHmac('sha256', WEBHOOK_SECRET)
-    .update(body, 'utf8')
+    .update(req.body)
     .digest('base64');
 
   if (hmac !== calculated) {
-    return res.status(401).send('Unauthorized');
-  }
-
-  res.status(200).send('OK');
-
-  const { inventory_item_id, variant_id } = req.body;
-  if (variant_id && inventory_item_id) {
-    await updateMetafield(variant_id, inventory_item_id);
-  }
-});
-
-app.get('/', (req, res) => res.send('🚀 Location Sync LIVE'));
-
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Listening on port ${port}`));
+    console.log('❌ HMAC mismatch
