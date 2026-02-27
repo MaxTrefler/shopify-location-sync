@@ -52,7 +52,7 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // Step 3: Webhook Route
-app.post('/webhooks/inventories/update', (req, res) => {
+app.post('/webhooks/inventory_levels/update', (req, res) => {
   const hmacHeader = req.header('X-Shopify-Hmac-Sha256');
   
   // Verify Webhook matches your app
