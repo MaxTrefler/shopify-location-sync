@@ -1,102 +1,84 @@
 const express = require('express');
-const Shopify = require('@shopify/shopify-api').default;
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
 
 const app = express();
-const port = process.env.PORT || 10000;
 
-app.use(express.json());
-app.use(express.raw({type: 'application/json'}));
+// This allows us to capture the raw body needed for Shopify HMAC verification
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
 
-// Shopify config
-Shopify.Context.initialize({
-  API_KEY: process.env.SHOPIFY_CLIENT_ID,
-  API_SECRET_KEY: process.env.SHOPIFY_CLIENT_SECRET,
-  SCOPES: process.env.SCOPES.split(','),
-  HOST_NAME: process.env.HOST.replace(/https?:\/\//, ''),
-  IS_EMBEDDED_APP: false,
-  API_VERSION: '2026-01',
+const PORT = process.env.PORT || 10000;
+const SHOP = process.env.SHOPIFY_SHOP;
+const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
+const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
+const HOST = process.env.HOST;
+
+// Step 1: Install Route
+app.get('/auth', (req, res) => {
+  const authUrl = `https://${SHOP}/admin/oauth/authorize?client_id=${CLIENT_ID}&scope=${process.env.SCOPES}&redirect_uri=${HOST}/auth/callback`;
+  res.redirect(authUrl);
 });
 
-// OAuth - Start auth
-app.get('/auth', async (req, res) => {
-  console.log('OAuth auth start for shop:', req.query.shop);
-  const authRoute = await Shopify.Auth.beginAuth(
-    req,
-    res,
-    req.query.shop || process.env.SHOPIFY_SHOP,
-    '/auth/callback',
-    false // offline/permanent token
-  );
-});
-
-// OAuth - Callback (stores token)
+// Step 2: Callback Route (Saves the permanent token)
 app.get('/auth/callback', async (req, res) => {
+  const code = req.query.code;
+  
+  if (!code) {
+    return res.status(400).send('No authorization code provided.');
+  }
+
   try {
-    const session = await Shopify.Auth.validateAuthCallback(req, res, req.query);
-    const tokenPath = path.join(__dirname, 'token.txt');
-    fs.writeFileSync(tokenPath, session.accessToken);
-    console.log('Token saved:', session.accessToken.substring(0, 10) + '...');
-    res.redirect('https://admin.shopify.com/store/soul-drums/apps/inventory-sync-49');
+    const tokenResponse = await fetch(`https://${SHOP}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        code: code
+      })
+    });
+
+    const data = await tokenResponse.json();
+    
+    // Save token locally
+    fs.writeFileSync('token.txt', data.access_token);
+    res.send('App installed successfully! Token saved. You can close this window and set up your webhook in Shopify Admin.');
   } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.status(500).send('Auth failed: ' + error.message);
+    console.error(error);
+    res.status(500).send('Error getting access token');
   }
 });
 
-// Get stored token
-function getToken() {
-  const tokenPath = path.join(__dirname, 'token.txt');
-  if (!fs.existsSync(tokenPath)) {
-    throw new Error('No token - install app first via /auth');
-  }
-  return fs.readFileSync(tokenPath, 'utf8').trim();
-}
-
-// Webhook - Inventory update
-app.post('/webhooks/inventories/update', async (req, res) => {
-  console.log('Inventory webhook received');
+// Step 3: Webhook Route
+app.post('/webhooks/inventories/update', (req, res) => {
+  const hmacHeader = req.header('X-Shopify-Hmac-Sha256');
   
-  // Verify HMAC
-  const hmac = req.get('X-Shopify-Hmac-Sha256');
-  const calculatedHmac = crypto
-    .createHmac('sha256', process.env.SHOPIFY_CLIENT_SECRET)
-    .update(req.body, 'utf8')
+  // Verify Webhook matches your app
+  const generatedHash = crypto
+    .createHmac('sha256', CLIENT_SECRET)
+    .update(req.rawBody)
     .digest('base64');
-  
-  if (hmac !== calculatedHmac) {
-    console.error('Webhook HMAC failed');
+
+  if (generatedHash !== hmacHeader) {
+    console.log('Webhook verification failed');
     return res.status(401).send('Unauthorized');
   }
   
-  const token = getToken();
-  const inventory = JSON.parse(req.body);
-  console.log('Inventory ID:', inventory.payload.inventory_item_id, 'Quantity:', inventory.payload.new_quantity);
+  console.log('Webhook verified! Inventory Data:', req.body);
   
-  // Your sync logic (example: update metafield)
-  try {
-    const response = await fetch(`https://${process.env.SHOPIFY_SHOP}/admin/api/2026-01/products.json`, {
-      headers: {
-        'X-Shopify-Access-Token': token,
-        'Content-Type': 'application/json'
-      }
-    });
-    console.log('API test OK:', response.status);
-  } catch (error) {
-    console.error('API error:', error);
-  }
-  
-  res.status(200).send('OK');
+  // Here is where you will use your saved token to do whatever API calls you need later
+  // const token = fs.readFileSync('token.txt', 'utf8');
+
+  res.status(200).send('Webhook processed successfully');
 });
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('Shopify Location Sync Ready. Install: /auth?shop=soul-drums.myshopify.com');
+  res.send('Server is running! To install, go to: ' + HOST + '/auth');
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  console.log('Install: https://shopify-location-sync.onrender.com/auth?shop=soul-drums.myshopify.com');
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
 });
