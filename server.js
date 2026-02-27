@@ -7,16 +7,29 @@ app.use(express.json({
 }));
 
 const PORT = process.env.PORT || 10000;
-const SHOP = process.env.SHOPIFY_SHOP;
+const SHOP = process.env.SHOPIFY_SHOP || 'soul-drums.myshopify.com';
 const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
 const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
+const HOST = 'https://shopify-location-sync.onrender.com';
 
-// The App Home Page (Loads normally inside Shopify Admin)
+// The App Home Page (Inside Shopify Admin)
 app.get('/', (req, res) => {
-  res.send('Server is running and listening for Webhooks!');
+  // We explicitly tell Shopify exactly where to send the code
+  const installUrl = `https://${SHOP}/admin/oauth/authorize?client_id=${CLIENT_ID}&scope=read_inventory,write_inventory,read_products,write_products&redirect_uri=${HOST}/auth/callback`;
+  
+  res.send(`
+    <div style="font-family: sans-serif; padding: 40px; text-align: center;">
+      <h2 style="color: #008060;">App is Running!</h2>
+      <p>We just need to generate your permanent access token for Render.</p>
+      <br><br>
+      <a href="${installUrl}" target="_top" style="background: #008060; color: #fff; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">
+        Generate Access Token
+      </a>
+    </div>
+  `);
 });
 
-// The OAuth Callback (Where Shopify sends the authorization code during install)
+// The OAuth Callback (Where the button sends you)
 app.get('/auth/callback', async (req, res) => {
   const code = req.query.code;
   
@@ -34,13 +47,12 @@ app.get('/auth/callback', async (req, res) => {
     const data = await tokenResponse.json();
     
     if (data.access_token) {
-        // This will print the token beautifully right inside your Shopify Admin window!
         return res.send(`
           <div style="font-family: sans-serif; padding: 40px; text-align: center;">
-            <h1 style="color: #008060;">App Installed Successfully!</h1>
+            <h1 style="color: #008060;">Success!</h1>
             <p>Please copy this permanent token and add it to your <b>Render Environment Variables</b> as <b>SHOPIFY_ACCESS_TOKEN</b>:</p>
             <h2 style="background: #f4f6f8; padding: 20px; border: 1px solid #dfe3e8; word-break: break-all; border-radius: 8px;">${data.access_token}</h2>
-            <p>Once you save it in Render, your webhooks will be fully operational.</p>
+            <p>Once you save it in Render and Render restarts, your webhook will work perfectly.</p>
           </div>
         `);
     } else {
