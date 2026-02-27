@@ -2,7 +2,6 @@ const express = require('express');
 const crypto = require('crypto');
 
 const app = express();
-
 app.use(express.json({
   verify: (req, res, buf) => { req.rawBody = buf; }
 }));
@@ -12,12 +11,17 @@ const SHOP = process.env.SHOPIFY_SHOP;
 const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
 const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 
-// Catch the Custom App Install Redirect
-app.get('/', async (req, res) => {
+// The App Home Page (Loads normally inside Shopify Admin)
+app.get('/', (req, res) => {
+  res.send('Server is running and listening for Webhooks!');
+});
+
+// The OAuth Callback (Where Shopify sends the authorization code during install)
+app.get('/auth/callback', async (req, res) => {
   const code = req.query.code;
   
   if (!code) {
-    return res.send('Server is running! If you are trying to install, please use the Custom Distribution link from Shopify.');
+    return res.send('No authorization code provided by Shopify.');
   }
 
   try {
@@ -30,19 +34,24 @@ app.get('/', async (req, res) => {
     const data = await tokenResponse.json();
     
     if (data.access_token) {
-        console.log('\n\n=== COPY THIS TOKEN TO RENDER ENV VARS ===');
-        console.log(data.access_token);
-        console.log('==========================================\n\n');
-        return res.send('App installed successfully! Check Render logs to copy your permanent token, then add it as SHOPIFY_ACCESS_TOKEN in Render Environment variables.');
+        // This will print the token beautifully right inside your Shopify Admin window!
+        return res.send(`
+          <div style="font-family: sans-serif; padding: 40px; text-align: center;">
+            <h1 style="color: #008060;">App Installed Successfully!</h1>
+            <p>Please copy this permanent token and add it to your <b>Render Environment Variables</b> as <b>SHOPIFY_ACCESS_TOKEN</b>:</p>
+            <h2 style="background: #f4f6f8; padding: 20px; border: 1px solid #dfe3e8; word-break: break-all; border-radius: 8px;">${data.access_token}</h2>
+            <p>Once you save it in Render, your webhooks will be fully operational.</p>
+          </div>
+        `);
     } else {
-        return res.send('Failed to get token. Make sure you uninstalled the app first before clicking the link.');
+        return res.send('Failed to get token. Shopify response: ' + JSON.stringify(data));
     }
   } catch (error) {
-    res.status(500).send('Error during installation');
+    res.status(500).send('Error during installation: ' + error.message);
   }
 });
 
-// The Webhook Handler
+// Your Webhook Handler
 app.post('/webhooks/inventory_levels/update', async (req, res) => {
   const hmacHeader = req.header('X-Shopify-Hmac-Sha256');
   const generatedHash = crypto.createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET).update(req.rawBody).digest('base64');
