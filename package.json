@@ -1,12 +1,11 @@
 {
-  "name": "shopify-location-sync",
+  "name": "shopify-sync",
   "version": "1.0.0",
-  "description": "Shopify inventory webhook",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2"
-  },
-  "engines
+  }
+}
