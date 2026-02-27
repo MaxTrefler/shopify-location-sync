@@ -57,7 +57,7 @@ app.post('/webhooks/inventory_levels/update', (req, res) => {
   
   // Verify Webhook matches your app
   const generatedHash = crypto
-    .createHmac('sha256', SHOPIFY_WEBHOOK_SECRET)
+    .createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET)
     .update(req.rawBody)
     .digest('base64');
 
